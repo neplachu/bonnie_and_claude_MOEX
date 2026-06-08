@@ -124,10 +124,6 @@ http://127.0.0.1:8050/
 
 Проект подготовлен для деплоя на Render.
 
-Start command:
-
-```bash
-gunicorn app:server
-```
+https://bonnie-and-claude-moex.onrender.com/
 
 
