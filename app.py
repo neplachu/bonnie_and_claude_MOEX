@@ -255,10 +255,6 @@ def load_and_prepare_data() -> pd.DataFrame:
         ["", "nan", "NaN", "None", "не указано"]
     )
 
-    df.loc[empty_reason_mask, "REASON_CATEGORY"] = (
-        df.loc[empty_reason_mask, "BUG_DETAILS"].apply(classify_reason)
-    )
-
     text_columns = [
         "PROJECT_NAME",
         "OBJECT_NAME",
