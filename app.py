@@ -1645,8 +1645,17 @@ def update_dashboard(
             "",
         )
 
+from dash import Dash, html, dcc
+
 app = Dash(__name__)
 server = app.server
+
+app.layout = html.Div(
+    children=[
+        html.H1("MOEX SLA Dashboard"),
+        html.P("Дашборд загружен"),
+    ]
+)
 
 if __name__ == "__main__":
     app.run(debug=True)
