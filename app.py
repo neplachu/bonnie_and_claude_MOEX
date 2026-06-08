@@ -1645,6 +1645,8 @@ def update_dashboard(
             "",
         )
 
+app = Dash(__name__)
+server = app.server
 
 if __name__ == "__main__":
     app.run(debug=True)
