@@ -6,12 +6,16 @@ from dash import Dash, html, dcc, Input, Output, State
 import plotly.express as px
 
 
+# ============================================================
+# 1. Файлы
+# ============================================================
+
 DATA_FILE = "weekly_sla_incidents.csv"
 ALL_REQUESTS_FILE = "table_end_v3.csv"
 
 
 # ============================================================
-# 1. Вспомогательные функции
+# 2. Вспомогательные функции
 # ============================================================
 
 def safe_percent(part, total):
@@ -131,18 +135,10 @@ def classify_reason(text):
 
 
 # ============================================================
-# 2. Загрузка и подготовка данных
+# 3. Загрузка данных
 # ============================================================
 
 def load_and_prepare_data() -> pd.DataFrame:
-    """
-    Загружает weekly_sla_incidents.csv.
-
-    Ожидается, что одна строка = один инцидент.
-    В таблице уже могут быть root cause-поля.
-    Если каких-то полей нет, они создаются с дефолтами.
-    """
-
     df = pd.read_csv(DATA_FILE)
     df.columns = df.columns.str.upper()
 
@@ -218,9 +214,6 @@ def load_and_prepare_data() -> pd.DataFrame:
 
     df["PRIORITY"] = df["PRIORITY"].apply(normalize_priority)
 
-    # Дата для анализа:
-    # если SLA-просрочка есть, берём SLA_FALL_DATE;
-    # если SLA-просрочки нет, берём CREATE_DATE.
     df["INCIDENT_DATE"] = df["INCIDENT_DATE"].fillna(
         df["SLA_FALL_DATE"].fillna(df["CREATE_DATE"])
     )
@@ -244,9 +237,6 @@ def load_and_prepare_data() -> pd.DataFrame:
     df["IS_OPEN"] = df["FIX_DATE"].isna().astype(int)
     df["IS_CRITICAL_OR_HIGH"] = df["PRIORITY"].isin(["Critical", "High"]).astype(int)
 
-    # Категория причины:
-    # если REASON_CATEGORY пустой, пробуем взять из Результат_Категория_1,
-    # иначе классифицируем BUG_DETAILS.
     if "РЕЗУЛЬТАТ_КАТЕГОРИЯ_1" in df.columns:
         df["REASON_CATEGORY"] = np.where(
             df["REASON_CATEGORY"].fillna("").astype(str).str.strip() == "",
@@ -261,8 +251,13 @@ def load_and_prepare_data() -> pd.DataFrame:
         .str.strip()
     )
 
-    empty_reason_mask = df["REASON_CATEGORY"].isin(["", "nan", "NaN", "None", "не указано"])
-    df.loc[empty_reason_mask, "REASON_CATEGORY"] = df.loc[empty_reason_mask, "BUG_DETAILS"].apply(classify_reason)
+    empty_reason_mask = df["REASON_CATEGORY"].isin(
+        ["", "nan", "NaN", "None", "не указано"]
+    )
+
+    df.loc[empty_reason_mask, "REASON_CATEGORY"] = (
+        df.loc[empty_reason_mask, "BUG_DETAILS"].apply(classify_reason)
+    )
 
     text_columns = [
         "PROJECT_NAME",
@@ -310,11 +305,6 @@ def load_and_prepare_data() -> pd.DataFrame:
 
 
 def load_all_requests_data() -> pd.DataFrame:
-    """
-    Загружает table_end_v3.csv — таблицу всех заявок / загрузок.
-    Она нужна как знаменатель для процентных метрик.
-    """
-
     if not os.path.exists(ALL_REQUESTS_FILE):
         return pd.DataFrame()
 
@@ -364,7 +354,6 @@ def filter_data(df, start_date, end_date, domains, priorities, sla_status_value)
 
     if sla_status_value == "breach":
         filtered = filtered[filtered["SLA_FALL"] == 1]
-
     elif sla_status_value == "no_breach":
         filtered = filtered[filtered["SLA_FALL"] == 0]
 
@@ -388,16 +377,10 @@ def filter_all_requests_by_period(all_requests_df, start_date, end_date):
 
 
 # ============================================================
-# 3. Метрики для новых блоков
+# 4. Метрики
 # ============================================================
 
 def build_reason_top(df: pd.DataFrame, selected_domain="all", top_n=10) -> pd.DataFrame:
-    """
-    ТОП причин:
-    - по всем доменам;
-    - либо по выбранному домену.
-    """
-
     temp = df.copy()
 
     if selected_domain and selected_domain != "all":
@@ -425,21 +408,13 @@ def build_reason_top(df: pd.DataFrame, selected_domain="all", top_n=10) -> pd.Da
     return reason_df
 
 
-def build_domain_percent_metrics(
-    incidents_df: pd.DataFrame,
-    all_requests_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Проблемность доменов с учётом общего числа заявок / загрузок.
-    """
-
+def build_domain_percent_metrics(incidents_df: pd.DataFrame, all_requests_df: pd.DataFrame) -> pd.DataFrame:
     if incidents_df.empty or all_requests_df.empty:
         return pd.DataFrame()
 
     incidents = incidents_df.copy()
     requests = all_requests_df.copy()
 
-    # Если в table_end_v3 нет домена, подтягиваем его по PROJECT_NAME из incidents.
     if requests["DATA_DOMAIN"].isna().all():
         project_domain_map = (
             incidents[["PROJECT_NAME", "DATA_DOMAIN"]]
@@ -533,7 +508,7 @@ def get_default_dates():
 
 
 # ============================================================
-# 4. Визуальные функции
+# 5. Визуальные функции
 # ============================================================
 
 def create_empty_figure(title):
@@ -651,7 +626,7 @@ def create_table(df, columns, max_rows=15):
 
 
 # ============================================================
-# 5. Dash layout
+# 6. Создание приложения
 # ============================================================
 
 default_start, default_end = get_default_dates()
@@ -660,6 +635,10 @@ app = Dash(__name__)
 server = app.server
 app.title = "MOEX SLA Dashboard"
 
+
+# ============================================================
+# 7. Layout
+# ============================================================
 
 app.layout = html.Div(
     style={
@@ -674,7 +653,7 @@ app.layout = html.Div(
         ),
 
         html.P(
-            "Анализ инцидентов, SLA-просрочек, root cause и проблемности доменов с учётом общего числа заявок",
+            "Анализ SLA-инцидентов, корневых причин, зависимостей и проблемности доменов",
             style={"textAlign": "center", "color": "#555", "marginBottom": "30px"},
         ),
 
@@ -691,65 +670,55 @@ app.layout = html.Div(
                 "boxShadow": "0 2px 10px rgba(0,0,0,0.08)",
             },
             children=[
-                html.Div(
-                    children=[
-                        html.Label("Дата начала"),
-                        dcc.DatePickerSingle(
-                            id="start-date",
-                            date=default_start,
-                            display_format="YYYY-MM-DD",
-                        ),
-                    ]
-                ),
+                html.Div([
+                    html.Label("Дата начала"),
+                    dcc.DatePickerSingle(
+                        id="start-date",
+                        date=default_start,
+                        display_format="YYYY-MM-DD",
+                    ),
+                ]),
 
-                html.Div(
-                    children=[
-                        html.Label("Дата окончания"),
-                        dcc.DatePickerSingle(
-                            id="end-date",
-                            date=default_end,
-                            display_format="YYYY-MM-DD",
-                        ),
-                    ]
-                ),
+                html.Div([
+                    html.Label("Дата окончания"),
+                    dcc.DatePickerSingle(
+                        id="end-date",
+                        date=default_end,
+                        display_format="YYYY-MM-DD",
+                    ),
+                ]),
 
-                html.Div(
-                    children=[
-                        html.Label("Домен"),
-                        dcc.Dropdown(
-                            id="domain-filter",
-                            multi=True,
-                            placeholder="Все домены",
-                        ),
-                    ]
-                ),
+                html.Div([
+                    html.Label("Домен"),
+                    dcc.Dropdown(
+                        id="domain-filter",
+                        multi=True,
+                        placeholder="Все домены",
+                    ),
+                ]),
 
-                html.Div(
-                    children=[
-                        html.Label("Критичность"),
-                        dcc.Dropdown(
-                            id="priority-filter",
-                            multi=True,
-                            placeholder="Все уровни",
-                        ),
-                    ]
-                ),
+                html.Div([
+                    html.Label("Критичность"),
+                    dcc.Dropdown(
+                        id="priority-filter",
+                        multi=True,
+                        placeholder="Все уровни",
+                    ),
+                ]),
 
-                html.Div(
-                    children=[
-                        html.Label("Факт SLA-просрочки"),
-                        dcc.Dropdown(
-                            id="sla-status-filter",
-                            options=[
-                                {"label": "Все инциденты", "value": "all"},
-                                {"label": "Есть SLA-просрочка", "value": "breach"},
-                                {"label": "Нет SLA-просрочки", "value": "no_breach"},
-                            ],
-                            value="all",
-                            clearable=False,
-                        ),
-                    ]
-                ),
+                html.Div([
+                    html.Label("Факт SLA-просрочки"),
+                    dcc.Dropdown(
+                        id="sla-status-filter",
+                        options=[
+                            {"label": "Все инциденты", "value": "all"},
+                            {"label": "Есть SLA-просрочка", "value": "breach"},
+                            {"label": "Нет SLA-просрочки", "value": "no_breach"},
+                        ],
+                        value="all",
+                        clearable=False,
+                    ),
+                ]),
 
                 html.Button(
                     "Сформировать отчёт",
@@ -811,7 +780,6 @@ app.layout = html.Div(
             style={"marginTop": "35px"},
             children=[
                 html.H2("ТОП причин инцидентов"),
-
                 html.P(
                     "Можно посмотреть причины в целом или отдельно по выбранному домену.",
                     style={"color": "#666"},
@@ -830,32 +798,28 @@ app.layout = html.Div(
                         "boxShadow": "0 2px 10px rgba(0,0,0,0.08)",
                     },
                     children=[
-                        html.Div(
-                            children=[
-                                html.Label("Домен для анализа причин"),
-                                dcc.Dropdown(
-                                    id="reason-domain-filter",
-                                    placeholder="Все домены",
-                                    clearable=False,
-                                ),
-                            ]
-                        ),
+                        html.Div([
+                            html.Label("Домен для анализа причин"),
+                            dcc.Dropdown(
+                                id="reason-domain-filter",
+                                placeholder="Все домены",
+                                clearable=False,
+                            ),
+                        ]),
 
-                        html.Div(
-                            children=[
-                                html.Label("Показать"),
-                                dcc.Dropdown(
-                                    id="reason-top-n",
-                                    options=[
-                                        {"label": "ТОП-5", "value": 5},
-                                        {"label": "ТОП-10", "value": 10},
-                                        {"label": "ТОП-15", "value": 15},
-                                    ],
-                                    value=10,
-                                    clearable=False,
-                                ),
-                            ]
-                        ),
+                        html.Div([
+                            html.Label("Показать"),
+                            dcc.Dropdown(
+                                id="reason-top-n",
+                                options=[
+                                    {"label": "ТОП-5", "value": 5},
+                                    {"label": "ТОП-10", "value": 10},
+                                    {"label": "ТОП-15", "value": 15},
+                                ],
+                                value=10,
+                                clearable=False,
+                            ),
+                        ]),
                     ],
                 ),
 
@@ -868,12 +832,10 @@ app.layout = html.Div(
             style={"marginTop": "35px"},
             children=[
                 html.H2("Проблемность доменов с учётом общего числа заявок"),
-
                 html.P(
                     "Сравнение доменов не только по количеству инцидентов, но и по доле от всех заявок / загрузок.",
                     style={"color": "#666"},
                 ),
-
                 dcc.Graph(id="domain-percent-chart"),
                 html.Div(id="domain-percent-table"),
             ],
@@ -884,7 +846,7 @@ app.layout = html.Div(
             children=[
                 html.H2("ТОП корневых причин по зависимостям"),
                 html.P(
-                    "Показывает объекты, которые могли потянуть за собой наибольшее число зависимых объектов.",
+                    "Показывает объекты, сбой которых мог вызвать наибольшее число зависимых инцидентов.",
                     style={"color": "#666"},
                 ),
                 html.Div(id="root-cause-table"),
@@ -896,7 +858,7 @@ app.layout = html.Div(
             children=[
                 html.H2("ТОП проблемных зон"),
                 html.P(
-                    "Домен → проект → объект → причина. Сортировка по риск-скору и количеству инцидентов.",
+                    "Домен → проект → объект → причина. Сортировка по индексу риска и количеству инцидентов.",
                     style={"color": "#666"},
                 ),
                 html.Div(id="problem-areas-table"),
@@ -915,7 +877,7 @@ app.layout = html.Div(
 
 
 # ============================================================
-# 6. Инициализация фильтров
+# 8. Callback для фильтров
 # ============================================================
 
 @app.callback(
@@ -940,7 +902,6 @@ def init_filters(_):
 
         priority_order = ["Critical", "High", "Medium", "Low", "Unknown"]
         existing_priorities = df["PRIORITY"].dropna().unique().tolist()
-
         priorities = [p for p in priority_order if p in existing_priorities]
 
         priority_options = [
@@ -955,7 +916,7 @@ def init_filters(_):
 
 
 # ============================================================
-# 7. Основной callback
+# 9. Основной callback
 # ============================================================
 
 @app.callback(
@@ -1006,21 +967,11 @@ def update_dashboard(
         return (
             "",
             [],
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            empty_fig,
-            "",
-            empty_fig,
-            "",
-            "",
-            "",
-            "",
+            empty_fig, empty_fig, empty_fig, empty_fig,
+            empty_fig, empty_fig, empty_fig, empty_fig,
+            empty_fig, "",
+            empty_fig, "",
+            "", "", "",
         )
 
     try:
@@ -1040,29 +991,15 @@ def update_dashboard(
             return (
                 "За выбранный период нет инцидентов",
                 [],
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                no_data_fig,
-                "",
-                no_data_fig,
-                "",
-                "",
-                "",
-                "",
+                no_data_fig, no_data_fig, no_data_fig, no_data_fig,
+                no_data_fig, no_data_fig, no_data_fig, no_data_fig,
+                no_data_fig, "",
+                no_data_fig, "",
+                "", "", "",
             )
 
-        # ------------------------------------------------------------
         # KPI
-        # ------------------------------------------------------------
-
         total_incidents = len(df)
-
         sla_breach_count = int((df["SLA_FALL"] == 1).sum())
         no_sla_breach_count = int((df["SLA_FALL"] == 0).sum())
         sla_breach_share = safe_percent(sla_breach_count, total_incidents)
@@ -1089,9 +1026,9 @@ def update_dashboard(
         top_root_df_for_kpi = (
             df[df["IS_CASCADE_INCIDENT"] == 1]
             .groupby("ROOT_CAUSE_OBJECT_NAME")
-            .agg(DOWNSTREAM_INCIDENTS=("ID", "count"))
+            .agg(DEPENDENT_INCIDENTS=("ID", "count"))
             .reset_index()
-            .sort_values("DOWNSTREAM_INCIDENTS", ascending=False)
+            .sort_values("DEPENDENT_INCIDENTS", ascending=False)
         )
 
         if top_root_df_for_kpi.empty:
@@ -1103,26 +1040,19 @@ def update_dashboard(
             create_kpi_card("Всего инцидентов", total_incidents, "SLA_FALL = 0 или 1"),
             create_kpi_card("SLA-просрочки", sla_breach_count, f"{sla_breach_share}% от выбранных инцидентов"),
             create_kpi_card("Без SLA-просрочки", no_sla_breach_count, "Сбой был, но закрыт до SLA"),
-            create_kpi_card("Critical + High", critical_high_count, f"{critical_high_share}% от выбранных инцидентов"),
+            create_kpi_card("Критичные и высокие", critical_high_count, f"{critical_high_share}% от выбранных инцидентов"),
             create_kpi_card("Каскадные инциденты", cascade_count, f"{cascade_share}% от выбранных инцидентов"),
-            create_kpi_card("Макс. число зависимых инцидентов", max_downstream_impact, f"Root cause: {top_root_object}"),
-            create_kpi_card("Индекс риска", risk_score, "Critical=5, High=3, Medium=2, Low=1"),
+            create_kpi_card("Макс. число зависимых инцидентов", max_downstream_impact, f"Корневая причина: {top_root_object}"),
+            create_kpi_card("Индекс риска", risk_score, "Чем выше значение, тем выше бизнес-риск"),
             create_kpi_card("Открытые инциденты", open_count, f"{open_share}% ещё не закрыто"),
             create_kpi_card("Среднее устранение", f"{avg_fix_time} ч", "Среднее FIX_DATE - CREATE_DATE"),
-            create_kpi_card("90% инцидентов устранены за:", f"{p90_fix_time} ч", "90% закрываются не дольше этого времени"),
+            create_kpi_card("90% инцидентов устранены за", f"{p90_fix_time} ч", "Не дольше указанного времени"),
         ]
 
-        # ------------------------------------------------------------
         # Основные графики
-        # ------------------------------------------------------------
-
         weekly_df = (
             df.groupby("WEEK_START")
-            .agg(
-                COUNT=("ID", "count"),
-                SLA_BREACHES=("SLA_FALL", "sum"),
-                CASCADE_INCIDENTS=("IS_CASCADE_INCIDENT", "sum"),
-            )
+            .agg(COUNT=("ID", "count"))
             .reset_index()
             .sort_values("WEEK_START")
         )
@@ -1139,7 +1069,6 @@ def update_dashboard(
                 COUNT=("ID", "count"),
                 SLA_BREACHES=("SLA_FALL", "sum"),
                 RISK_SCORE=("RISK_SCORE", "sum"),
-                CASCADE_INCIDENTS=("IS_CASCADE_INCIDENT", "sum"),
             )
             .reset_index()
             .sort_values("COUNT", ascending=False)
@@ -1170,12 +1099,11 @@ def update_dashboard(
             df[df["IS_CASCADE_INCIDENT"] == 1]
             .groupby("ROOT_CAUSE_OBJECT_NAME")
             .agg(
-                DOWNSTREAM_INCIDENTS=("ID", "count"),
+                DEPENDENT_INCIDENTS=("ID", "count"),
                 RISK_SCORE=("RISK_SCORE", "sum"),
-                SLA_BREACHES=("SLA_FALL", "sum"),
             )
             .reset_index()
-            .sort_values(["DOWNSTREAM_INCIDENTS", "RISK_SCORE"], ascending=False)
+            .sort_values(["DEPENDENT_INCIDENTS", "RISK_SCORE"], ascending=False)
             .head(10)
         )
 
@@ -1250,24 +1178,24 @@ def update_dashboard(
             x="RISK_SCORE",
             y="OBJECT_NAME",
             title="ТОП-10 объектов по индексу риска",
-            labels={"RISK_SCORE": "Risk Score", "OBJECT_NAME": "ETL-объект"},
+            labels={"RISK_SCORE": "Индекс риска", "OBJECT_NAME": "ETL-объект"},
             text="RISK_SCORE",
             orientation="h",
         )
 
         if root_cause_chart_df.empty:
-            root_cause_fig = create_empty_figure("ТОП объектов - корневых причин")
+            root_cause_fig = create_empty_figure("ТОП объектов — корневых причин")
         else:
             root_cause_fig = px.bar(
-                root_cause_chart_df.sort_values("DOWNSTREAM_INCIDENTS"),
-                x="DOWNSTREAM_INCIDENTS",
+                root_cause_chart_df.sort_values("DEPENDENT_INCIDENTS"),
+                x="DEPENDENT_INCIDENTS",
                 y="ROOT_CAUSE_OBJECT_NAME",
                 title="ТОП объектов по числу зависимых инцидентов",
                 labels={
-                    "DOWNSTREAM_INCIDENTS": "Зависимые инциденты",
-                    "ROOT_CAUSE_OBJECT_NAME": "Корневой объект",
+                    "DEPENDENT_INCIDENTS": "Зависимых инцидентов",
+                    "ROOT_CAUSE_OBJECT_NAME": "Объект — корневая причина",
                 },
-                text="DOWNSTREAM_INCIDENTS",
+                text="DEPENDENT_INCIDENTS",
                 orientation="h",
             )
 
@@ -1285,14 +1213,11 @@ def update_dashboard(
             x="DATA_DOMAIN",
             y="RISK_SCORE",
             title="Индекс риска по доменам",
-            labels={"DATA_DOMAIN": "Домен", "RISK_SCORE": "Risk Score"},
+            labels={"DATA_DOMAIN": "Домен", "RISK_SCORE": "Индекс риска"},
             text="RISK_SCORE",
         )
 
-        # ------------------------------------------------------------
-        # Новый блок: ТОП причин в целом / по домену
-        # ------------------------------------------------------------
-
+        # ТОП причин
         reason_top_df = build_reason_top(
             df=df,
             selected_domain=reason_domain_value,
@@ -1315,11 +1240,8 @@ def update_dashboard(
                 reason_top_df.sort_values("RISK_SCORE"),
                 x="RISK_SCORE",
                 y="REASON_CATEGORY",
-                title="ТОП причин по Risk Score",
-                labels={
-                    "RISK_SCORE": "Risk Score",
-                    "REASON_CATEGORY": "Причина",
-                },
+                title="ТОП причин по индексу риска",
+                labels={"RISK_SCORE": "Индекс риска", "REASON_CATEGORY": "Причина"},
                 text="RISK_SCORE",
                 orientation="h",
             )
@@ -1329,7 +1251,7 @@ def update_dashboard(
                     "REASON_CATEGORY": "Причина",
                     "INCIDENTS": "Инцидентов",
                     "SLA_BREACHES": "SLA-просрочек",
-                    "RISK_SCORE": "Risk Score",
+                    "RISK_SCORE": "Индекс риска",
                     "AFFECTED_OBJECTS": "Затронуто объектов",
                     "AVG_FIX_TIME_HOURS": "Среднее устранение, ч",
                 }
@@ -1341,17 +1263,14 @@ def update_dashboard(
                     "Причина",
                     "Инцидентов",
                     "SLA-просрочек",
-                    "Risk Score",
+                    "Индекс риска",
                     "Затронуто объектов",
                     "Среднее устранение, ч",
                 ],
                 max_rows=int(reason_top_n or 10),
             )
 
-        # ------------------------------------------------------------
-        # Новый блок: проблемность доменов от всех заявок
-        # ------------------------------------------------------------
-
+        # Процентные метрики доменов
         domain_percent_df = build_domain_percent_metrics(
             incidents_df=df,
             all_requests_df=all_requests_period_df,
@@ -1392,8 +1311,8 @@ def update_dashboard(
                     "SLA_BREACH_RATE_PCT": "SLA-просрочки от заявок, %",
                     "AFFECTED_OBJECTS": "Затронуто объектов",
                     "AFFECTED_OBJECTS_SHARE_PCT": "Затронуто объектов, %",
-                    "RISK_SCORE": "Risk Score",
-                    "RISK_SCORE_PER_1000_REQUESTS": "Risk Score на 1000 заявок",
+                    "RISK_SCORE": "Индекс риска",
+                    "RISK_SCORE_PER_1000_REQUESTS": "Индекс риска на 1000 заявок",
                     "AVG_FIX_TIME_HOURS": "Среднее устранение, ч",
                 }
             )
@@ -1410,17 +1329,14 @@ def update_dashboard(
                     "Всего объектов",
                     "Затронуто объектов",
                     "Затронуто объектов, %",
-                    "Risk Score",
-                    "Risk Score на 1000 заявок",
+                    "Индекс риска",
+                    "Индекс риска на 1000 заявок",
                     "Среднее устранение, ч",
                 ],
                 max_rows=20,
             )
 
-        # ------------------------------------------------------------
-        # Таблица: root cause
-        # ------------------------------------------------------------
-
+        # Таблица root cause
         root_cause_df = (
             df[df["IS_CASCADE_INCIDENT"] == 1]
             .groupby(
@@ -1432,7 +1348,7 @@ def update_dashboard(
                 ]
             )
             .agg(
-                DOWNSTREAM_INCIDENTS=("ID", "count"),
+                DEPENDENT_INCIDENTS=("ID", "count"),
                 SLA_BREACHES=("SLA_FALL", "sum"),
                 RISK_SCORE=("RISK_SCORE", "sum"),
                 AFFECTED_OBJECTS=("OBJECT_NAME", "nunique"),
@@ -1440,7 +1356,7 @@ def update_dashboard(
                 AVG_FIX_TIME_HOURS=("FIX_TIME_HOURS", "mean"),
             )
             .reset_index()
-            .sort_values(["DOWNSTREAM_INCIDENTS", "RISK_SCORE", "SLA_BREACHES"], ascending=False)
+            .sort_values(["DEPENDENT_INCIDENTS", "RISK_SCORE", "SLA_BREACHES"], ascending=False)
         )
 
         if not root_cause_df.empty:
@@ -1448,15 +1364,15 @@ def update_dashboard(
 
         root_cause_df = root_cause_df.rename(
             columns={
-                "ROOT_CAUSE_REQ_ID": "Root REQ_ID",
-                "ROOT_CAUSE_DOMAIN": "Домен root cause",
-                "ROOT_CAUSE_OBJECT_NAME": "Объект root cause",
-                "ROOT_CAUSE_REASON_CATEGORY": "Причина root cause",
-                "DOWNSTREAM_INCIDENTS": "Downstream-инцидентов",
+                "ROOT_CAUSE_REQ_ID": "REQ_ID корневой причины",
+                "ROOT_CAUSE_DOMAIN": "Домен корневой причины",
+                "ROOT_CAUSE_OBJECT_NAME": "Объект — корневая причина",
+                "ROOT_CAUSE_REASON_CATEGORY": "Причина корневого сбоя",
+                "DEPENDENT_INCIDENTS": "Зависимых инцидентов",
                 "SLA_BREACHES": "SLA-просрочек",
-                "RISK_SCORE": "Risk Score",
+                "RISK_SCORE": "Индекс риска",
                 "AFFECTED_OBJECTS": "Затронуто объектов",
-                "MAX_DEPTH": "Макс. глубина",
+                "MAX_DEPTH": "Макс. глубина цепочки",
                 "AVG_FIX_TIME_HOURS": "Среднее устранение, ч",
             }
         )
@@ -1464,24 +1380,21 @@ def update_dashboard(
         root_cause_table = create_table(
             root_cause_df,
             [
-                "Root REQ_ID",
-                "Домен root cause",
-                "Объект root cause",
-                "Причина root cause",
-                "Downstream-инцидентов",
+                "REQ_ID корневой причины",
+                "Домен корневой причины",
+                "Объект — корневая причина",
+                "Причина корневого сбоя",
+                "Зависимых инцидентов",
                 "SLA-просрочек",
-                "Risk Score",
+                "Индекс риска",
                 "Затронуто объектов",
-                "Макс. глубина",
+                "Макс. глубина цепочки",
                 "Среднее устранение, ч",
             ],
             max_rows=15,
         )
 
-        # ------------------------------------------------------------
-        # Таблица: проблемные зоны
-        # ------------------------------------------------------------
-
+        # Таблица проблемных зон
         problem_areas_df = (
             df.groupby(["DATA_DOMAIN", "PROJECT_NAME", "OBJECT_NAME", "REASON_CATEGORY"])
             .agg(
@@ -1506,7 +1419,7 @@ def update_dashboard(
                 "COUNT": "Инцидентов",
                 "SLA_BREACHES": "SLA-просрочек",
                 "CASCADE_INCIDENTS": "Каскадных",
-                "RISK_SCORE": "Risk Score",
+                "RISK_SCORE": "Индекс риска",
                 "AVG_FIX_TIME_HOURS": "Среднее устранение, ч",
             }
         )
@@ -1521,16 +1434,13 @@ def update_dashboard(
                 "Инцидентов",
                 "SLA-просрочек",
                 "Каскадных",
-                "Risk Score",
+                "Индекс риска",
                 "Среднее устранение, ч",
             ],
             max_rows=15,
         )
 
-        # ------------------------------------------------------------
-        # Таблица: повторяющиеся инциденты
-        # ------------------------------------------------------------
-
+        # Повторяющиеся инциденты
         repeated_df = (
             df.groupby(["OBJECT_NAME", "REASON_CATEGORY"])
             .agg(
@@ -1550,7 +1460,7 @@ def update_dashboard(
                 "REASON_CATEGORY": "Причина",
                 "REPEAT_COUNT": "Количество повторов",
                 "SLA_BREACHES": "SLA-просрочек",
-                "RISK_SCORE": "Risk Score",
+                "RISK_SCORE": "Индекс риска",
             }
         )
 
@@ -1561,7 +1471,7 @@ def update_dashboard(
                 "Причина",
                 "Количество повторов",
                 "SLA-просрочек",
-                "Risk Score",
+                "Индекс риска",
             ],
             max_rows=15,
         )
@@ -1625,37 +1535,20 @@ def update_dashboard(
             f"Ошибка: {error}",
             [],
 
-            error_fig,
-            error_fig,
-            error_fig,
-            error_fig,
-            error_fig,
-            error_fig,
-            error_fig,
-            error_fig,
+            error_fig, error_fig, error_fig, error_fig,
+            error_fig, error_fig, error_fig, error_fig,
 
-            error_fig,
-            "",
+            error_fig, "",
 
-            error_fig,
-            "",
+            error_fig, "",
 
-            "",
-            "",
-            "",
+            "", "", "",
         )
 
-from dash import Dash, html, dcc
 
-app = Dash(__name__)
-server = app.server
-
-app.layout = html.Div(
-    children=[
-        html.H1("MOEX SLA Dashboard"),
-        html.P("Дашборд загружен"),
-    ]
-)
+# ============================================================
+# 10. Локальный запуск
+# ============================================================
 
 if __name__ == "__main__":
     app.run(debug=True)
